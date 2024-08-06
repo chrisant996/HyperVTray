@@ -10,55 +10,54 @@
 #include <shellapi.h>
 #include <dwmapi.h>
 #include <wbemidl.h>
-
-constexpr UINT c_idTrayIcon = 1;
-constexpr UINT WMU_TRAYNOTIFY = WM_USER + 111;
+#include <map>
 
 static const UINT c_msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 static const WCHAR c_szWndClass[] = L"HyperVTray_hidden_window";
 
-static const WCHAR c_szTip[] = L"Tooltip text";
-
 static HINSTANCE s_hinst = 0;
 static HWND s_hwndMain = 0;
 static HICON s_hicon = 0;
-static bool s_fInTray = false;
 
-enum class MenuMode { Watching, LDown, Cancelled };
+// Tray icon management.
 
-static HMENU s_hmenu = 0;
-static std::vector<SPI<IWbemClassObject>> s_vms;
-static INT s_menuSelectIndex = -1;
-static INT s_menuDownIndex = -1;
-static MenuMode s_menuMode = MenuMode::Watching;
-static RECT s_menuItemRect;
+constexpr UINT c_idTrayIcon = 1;
+constexpr UINT WMU_TRAYNOTIFY = WM_USER;
+static const WCHAR c_szTip[] = L"Hyper-V management";
+static bool s_isIconInstalled = false;
 
-static bool TrayMessage(DWORD dwMessage, UINT uID, HICON hIcon, LPCTSTR pszTip)
+static bool TrayMessage(DWORD dwMessage, LPCWSTR title=nullptr, LPCWSTR message=nullptr, DWORD dwInfoFlags=NIIF_INFO)
 {
-    NOTIFYICONDATA  tnd = { sizeof(tnd) };
-    tnd.hWnd                = s_hwndMain;
-    tnd.uID                 = uID;
-    tnd.uFlags              = NIF_MESSAGE;
-    tnd.uCallbackMessage    = WMU_TRAYNOTIFY;
+    NOTIFYICONDATA  data = { sizeof(data) };
+    data.hWnd               = s_hwndMain;
+    data.uID                = c_idTrayIcon;
+    data.uFlags             = NIF_MESSAGE;
+    data.uCallbackMessage   = WMU_TRAYNOTIFY;
 
-    if (hIcon)
+    if (s_hicon)
     {
-        tnd.uFlags |= NIF_ICON;
-        tnd.hIcon = hIcon;
+        data.uFlags |= NIF_ICON;
+        data.hIcon = s_hicon;
     }
 
-    if (pszTip)
+    data.uFlags |= NIF_TIP;
+    wcscpy_s(data.szTip, c_szTip);
+
+    if (title && message)
     {
-        tnd.uFlags |= NIF_TIP;
-        lstrcpyn(tnd.szTip, pszTip, _countof(tnd.szTip) - 1);
+        data.uFlags = NIF_INFO;
+        data.dwInfoFlags = dwInfoFlags;
+        wcscpy_s(data.szInfo, message);
+        wcscpy_s(data.szInfoTitle, title);
+        data.uTimeout = 4 * 1000;
     }
 
     const DWORD tickBegin = GetTickCount();
-    while (!Shell_NotifyIcon(dwMessage, &tnd))
+    while (!Shell_NotifyIcon(dwMessage, &data))
     {
-        if (GetTickCount() - tickBegin > 30 * 1000)
+        if (GetTickCount() - tickBegin > 10 * 1000)
             return false;
-        Sleep(1 * 1000);
+        Sleep(500);
     }
 
     return true;
@@ -66,133 +65,85 @@ static bool TrayMessage(DWORD dwMessage, UINT uID, HICON hIcon, LPCTSTR pszTip)
 
 static void AddTrayIcon()
 {
-    assert(!s_fInTray);
+    assert(!s_isIconInstalled);
 
-    TrayMessage(NIM_ADD, c_idTrayIcon, s_hicon, c_szTip);
-    s_fInTray = true;
+    TrayMessage(NIM_ADD);
+    s_isIconInstalled = true;
 }
 
-#if 0
-static void UpdateTrayIcon()
+static void UpdateTrayIcon(LPCWSTR title=nullptr, LPCWSTR message=nullptr, DWORD dwInfoFlags=NIIF_INFO)
 {
-    assert(s_fInTray);
+    assert(s_isIconInstalled);
 
-    TrayMessage(NIM_MODIFY, c_idTrayIcon, s_hicon, c_szTip);
+    TrayMessage(NIM_MODIFY, title, message, dwInfoFlags);
 }
-#endif
 
 static void DeleteTrayIcon()
 {
-	if (s_fInTray)
+	if (s_isIconInstalled)
     {
-        TrayMessage(NIM_DELETE, c_idTrayIcon, 0, 0);
-        s_fInTray = false;
+        TrayMessage(NIM_DELETE);
+        s_isIconInstalled = false;
     }
 }
 
-#if 0
-namespace Hyper_V_Manager
+// Notifications.
+
+constexpr UINT c_timerId = 99;
+constexpr UINT c_timerInterval = 4500;
+
+static std::map<std::wstring, VmState> s_watching;
+
+static void DoNotifications()
 {
-    /// <inheritdoc />
-    /// <summary>
-    /// Main Form
-    /// </summary>
-    public partial class Form1 : Form
+    auto vms = GetVirtualMachines();
+
+    std::wstring name;
+    for (const auto& vm : vms)
     {
-        private readonly Timer _timer = new Timer();
-        private readonly Dictionary<string, string> _changingVMs = new Dictionary<string, string>();
+        if (!GetStringProp(vm, L"ElementName", name))
+            continue;
 
-        /// <summary>
-        /// Form load event
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void Form1_Load(object sender, EventArgs e)
+        if (s_watching.find(name) == s_watching.end())
+            continue;
+
+        ULONG state;
+        if (!GetIntegerProp(vm, L"EnabledState", state))
+            continue;
+
+        const VmState watchedState = s_watching[name];
+        const VmState observedState = VmState(state);
+
+        if (watchedState != observedState)
         {
-            _timer.Elapsed += TimerElapsed;
-            _timer.Interval = 4500;
-            BuildContextMenu();
+            s_watching[name] = observedState;
+            AppendStateString(name, observedState, false/*brackets*/);
+            UpdateTrayIcon(L"VM State Changed", name.c_str());
         }
-
-        /// <summary>
-        /// Time elapsed event
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void TimerElapsed(object sender, ElapsedEventArgs e)
+        else if (observedState == VmState::Running ||
+                 observedState == VmState::Stopped ||
+                 observedState == VmState::Paused ||
+                 observedState == VmState::Saved)
         {
-            if(!contextMenuStrip1.Visible)
-                UpdateBalloontip();
-        }
-
-        /// <summary>
-        /// Update Balloon Tooltip on VM State Change
-        /// </summary>
-        private void UpdateBalloontip()
-        {
-            var localVMs = GetVMs();
-
-            foreach (var vm in localVMs)
-            {
-                if (!_changingVMs.ContainsKey(vm["ElementName"].ToString())) continue;
-                var initvmBalloonState = _changingVMs[vm["ElementName"].ToString()];
-                var vmState = (VmState) Convert.ToInt32(vm["EnabledState"]);
-                var currentBalloonState = vmState.ToString();
-
-                if (initvmBalloonState != currentBalloonState)
-                {
-                    notifyIcon1.ShowBalloonTip(4000, "VM State Changed", vm["ElementName"] + " " + currentBalloonState, ToolTipIcon.Info);
-                    _changingVMs[vm["ElementName"].ToString()] = currentBalloonState;
-                }
-                else if (vmState == VmState.Running || vmState == VmState.Stopped || vmState == VmState.Paused || vmState == VmState.Saved)
-                    _changingVMs.Remove(vm["ElementName"].ToString());
-                else if (_changingVMs.Count <= 0)
-                    _timer.Enabled = false;
-            }
+            s_watching.erase(name);
+            if (s_watching.empty())
+                break;
         }
     }
 }
-#endif
+
+// Context menu.
 
 enum class VmOp { Connect, Start, Stop, ShutDown, Save, Pause };
+enum class MenuMode { Watching, LDown, Cancelled };
 
-static void AppendStateString(std::wstring& inout, VmState state)
-{
-    static const struct { VmState state; LPCWSTR text; } c_states[] =
-    {
-        { VmState::Unknown,     L"Unknown" },
-        { VmState::Other,       L"Other" },
-        { VmState::Running,     L"Running" },
-        { VmState::Stopped,     L"Stopped" },
-        { VmState::ShutDown,    L"ShutDown" },
-        { VmState::Saved,       L"Saved" },
-        { VmState::Paused,      L"Paused" },
-        { VmState::Starting,    L"Starting" },
-        { VmState::Saving,      L"Saving" },
-        { VmState::Stopping,    L"Stopping" },
-        { VmState::Pausing,     L"Pausing" },
-        { VmState::Resuming,    L"Resuming" },
-    };
-
-    for (const auto& s : c_states)
-    {
-        if (s.state == state)
-        {
-            inout.append(L"  [");
-            inout.append(s.text);
-            inout.append(L"]");
-            return;
-        }
-    }
-
-    if (ULONG(state))
-    {
-        WCHAR unknown[64];
-        swprintf_s(unknown, L"  [%d]", state);
-        inout.append(unknown);
-        return;
-    }
-}
+static std::vector<SPI<IWbemClassObject>> s_vms;
+static HMENU s_hmenu = 0;
+static bool s_inContextMenu = false;
+static INT s_menuSelectIndex = -1;
+static INT s_menuDownIndex = -1;
+static MenuMode s_menuMode = MenuMode::Watching;
+static RECT s_menuItemRect;
 
 static DWORD EnableFlags(bool enable)
 {
@@ -214,7 +165,7 @@ static HMENU BuildContextMenu(const std::vector<SPI<IWbemClassObject>> vms)
 
             VmState vmstate = VmState(state);
 
-            AppendStateString(name, vmstate);
+            AppendStateString(name, vmstate, true/*brackets*/);
 
             const UINT idmBase = IDM_FIRSTVM + (i * 10);
             const UINT idmPopup = idmBase + WORD(VmOp::Connect);
@@ -274,26 +225,30 @@ static void DoCommand(UINT id)
         if (index < s_vms.size())
         {
             IWbemClassObject* pObject = s_vms[index];
+
+            const VmOp op = VmOp((id - IDM_FIRSTVM) % 10);
+            VmState requestedState = VmState::Unknown;
+
             switch (VmOp((id - IDM_FIRSTVM) % 10))
             {
-                case VmOp::Connect:
-                    VmConnect(pObject);
-                    break;
-                case VmOp::Start:
-                    ChangeVmState(pObject, VmState::Running);
-                    break;
-                case VmOp::Stop:
-                    ChangeVmState(pObject, VmState::Stopped);
-                    break;
-                case VmOp::ShutDown:
-                    ChangeVmState(pObject, VmState::ShutDown);
-                    break;
-                case VmOp::Save:
-                    ChangeVmState(pObject, VmState::Saved);
-                    break;
-                case VmOp::Pause:
-                    ChangeVmState(pObject, VmState::Paused);
-                    break;
+            case VmOp::Connect:     VmConnect(pObject); break;
+            case VmOp::Start:       requestedState = VmState::Running; break;
+            case VmOp::Stop:        requestedState = VmState::Stopped; break;
+            case VmOp::ShutDown:    requestedState = VmState::ShutDown; break;
+            case VmOp::Save:        requestedState = VmState::Saved; break;
+            case VmOp::Pause:       requestedState = VmState::Paused; break;
+            }
+
+            if (requestedState != VmState::Unknown)
+            {
+                std::wstring name;
+                if (GetStringProp(pObject, L"ElementName", name))
+                {
+                    s_watching[name] = VmState::Unknown;
+                    SetTimer(s_hwndMain, c_timerId, c_timerInterval, 0);
+                }
+
+                ChangeVmState(pObject, requestedState);
             }
         }
     }
@@ -373,9 +328,13 @@ static void DoContextMenu(HWND hwnd)
     // disappear unless the window is set as the foreground window.
     SetForegroundWindow(hwnd);
 
+    s_inContextMenu = true;
+
     POINT pt;
     GetCursorPos(&pt);
     const UINT id = TrackPopupMenu(s_hmenu, TPM_LEFTALIGN|TPM_RIGHTBUTTON|TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, NULL);
+
+    s_inContextMenu = false;
 
     // Workaround:  due to a well-known issue in Windows, the menu won't
     // disappear correctly unless it is sent a message (WM_NULL is a nop).
@@ -420,6 +379,16 @@ static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         OnEnterIdle(wParam, lParam);
         break;
 
+    case WM_TIMER:
+        if (wParam == c_timerId)
+        {
+            if (!s_inContextMenu)
+                DoNotifications();
+            if (!s_watching.size())
+                KillTimer(hwnd, c_timerId);
+        }
+        break;
+
     case WM_DESTROY:
         s_vms.clear();
         DeleteTrayIcon();
@@ -437,6 +406,8 @@ static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 
     return 0;
 }
+
+// Hidden main window.
 
 static bool Init()
 {

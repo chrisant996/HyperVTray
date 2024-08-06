@@ -21,3 +21,7 @@ HyperVTray uses [Premake](http://premake.github.io) to generate Visual Studio so
 3. Build scripts will be generated in <code>.build\\<em>toolchain</em></code>. For example `.build\vs2019\hypervtray.sln`.
 4. Call your toolchain of choice (Visual Studio, msbuild.exe, etc).
 
+# Credits
+
+https://github.com/kariudo/Hyper-VManagerTray
+https://www.codeproject.com/articles/84143/programmed-hyper-v-management
