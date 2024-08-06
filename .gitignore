@@ -1,0 +1,6 @@
+.build
+tags
+*.exe
+*.log
+*.patch
+*.zip
