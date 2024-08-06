@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <shellapi.h>
 #include <dwmapi.h>
+#include <wbemidl.h>
 
 constexpr UINT c_idTrayIcon = 1;
 constexpr UINT WMU_TRAYNOTIFY = WM_USER + 111;
@@ -60,14 +61,14 @@ static void AddTrayIcon()
     s_fInTray = true;
 }
 
-
+#if 0
 static void UpdateTrayIcon()
 {
     assert(s_fInTray);
 
     TrayMessage(NIM_MODIFY, c_idTrayIcon, s_hicon, c_szTip);
 }
-
+#endif
 
 static void DeleteTrayIcon()
 {
@@ -142,6 +143,7 @@ static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         break;
 
     case WM_DESTROY:
+        DeleteTrayIcon();
         s_hwndMain = 0;
         break;
 
@@ -161,6 +163,8 @@ static bool Init()
 {
     s_hicon = LoadIcon(s_hinst, MAKEINTRESOURCEW(IDI_MAIN));
 
+    // Initialize the window.
+
     WNDCLASS wc;
     wc.style = CS_DBLCLKS;
     wc.lpfnWndProc = HiddenWndProc;
@@ -179,6 +183,25 @@ static bool Init()
     s_hwndMain = CreateWindow(c_szWndClass, c_szWndClass, 0, 0, 0, 0, 0, nullptr, 0, s_hinst, 0);
     if (!s_hwndMain)
         return false;
+
+    // Initialize COM.
+
+    HRESULT hr = CoInitializeEx(0, COINIT_MULTITHREADED);
+    if (SUCCEEDED(hr))
+        hr = CoInitializeSecurity(
+            NULL,                        // Security descriptor
+            -1,                          // COM negotiates authentication service
+            NULL,                        // Authentication services
+            NULL,                        // Reserved
+            RPC_C_AUTHN_LEVEL_DEFAULT,   // Default authentication level for proxies
+            RPC_C_IMP_LEVEL_IMPERSONATE, // Default Impersonation level for proxies
+            NULL,                        // Authentication info
+            EOAC_NONE,                   // Additional capabilities of the client or server
+            NULL);                       // Reserved
+    if (FAILED(hr))
+    {
+        // TODO: somehow report the error?
+    }
 
     return true;
 }
