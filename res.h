@@ -9,12 +9,8 @@
 #define IDI_MAIN                1
 
 //----------------------------------------------------------------------------
-// Context Menus.
-
-#define IDR_CONTEXT_MENU        1000
-
-//----------------------------------------------------------------------------
 // Menu Commands.
 
-#define IDM_EXIT                2000
+#define IDM_EXIT                100
+#define IDM_FIRSTVM             200
 

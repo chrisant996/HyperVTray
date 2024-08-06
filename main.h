@@ -35,21 +35,31 @@ class SPI
 
 public:
     SPI()                           { m_p = 0; }
+    explicit SPI(IFace *p)          { m_p = p; if (m_p) m_p->AddRef(); }
+    explicit SPI(SPI<IFace,ICast> const& sp) { m_p = sp.Copy(); }
+    explicit SPI(SPI<IFace,ICast>&& other) { m_p = other.m_p; other.m_p = 0; }
 #if 0
     // Disabled because of ambiguity between "SPI<Foo> spFoo = new Foo"
     // and "SPI<Foo> spFoo( spPtrToCopy )".  One should not AddRef, but
     // the other sometimes should and sometimes should not.  But both end
-    // up using the constructor.  So for now we can't allow either form.
+    // up using the constructor.  So for now don't allow either form.
     SPI(IFace *p)                   { m_p = p; if (m_p) m_p->AddRef(); }
 #endif
     ~SPI()                          { if (m_p) RemoveConst(m_p)->Release(); }
-    SPI(SPI<IFace,ICast>&& other)   { m_p = other.m_p; other.m_p = 0; }
     operator IFace*() const         { return m_p; }
     SPI_TAGGINGTRICK(IFace)* Pointer() const { return static_cast<PrivateRelease<IFace>*>(m_p); }
     SPI_TAGGINGTRICK(IFace)* operator->() const { return static_cast<PrivateRelease<IFace>*>(RemoveConst(m_p)); }
     IFace** operator &()            { assert(!m_p); return &m_p; }
+
+    // operator= with a raw pointer attaches without changing the refcount.
     IFace* operator=(IFace* p)      { assert(!m_p); return m_p = p; }
+
+    // operator= with an rvalue transfers the pointer without changing the refcount.
     IFace* operator=(SPI<IFace,ICast>&& other) { assert(!m_p); m_p = other.m_p; other.m_p = 0; return m_p; }
+
+    // operator= with a smart pointer changes the refcount.
+    SPI<IFace,ICast>& operator=(SPI<IFace,ICast> const& sp) { Set(sp.Pointer()); return *this; }
+
     IFace* Transfer()               { return Detach(); }
     IFace* Copy() const             { if (m_p) RemoveConst(m_p)->AddRef(); return m_p; }
     void Release()                  { Attach(0); }
@@ -65,10 +75,6 @@ protected:
 
 protected:
     IFace* m_p;
-
-private:
-    SPI<IFace,ICast>& operator=(SPI<IFace,ICast> const& sp) = delete;
-    SPI(SPI<IFace,ICast> const&) = delete;
 };
 
 struct IUnknown;

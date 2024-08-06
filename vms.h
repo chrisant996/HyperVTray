@@ -24,5 +24,8 @@ enum class VmState
 };
 
 void VmConnect(IWbemClassObject* pObject);
-void ChangeVmState(LPCWSTR requestedState, LPCWSTR vmName);
+void ChangeVmState(IWbemClassObject* pObject, VmState requestedState);
 std::vector<SPI<IWbemClassObject>> GetVirtualMachines();
+
+bool GetStringProp(IWbemClassObject* pObject, LPCWSTR propName, std::wstring& out);
+bool GetIntegerProp(IWbemClassObject* pObject, LPCWSTR propName, ULONG& out);

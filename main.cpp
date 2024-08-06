@@ -2,8 +2,10 @@
 // License: http://opensource.org/licenses/MIT
 
 #include "main.h"
+#include "vms.h"
 #include "darkmode.h"
 #include "res.h"
+#include <windowsx.h>
 #include <stdlib.h>
 #include <shellapi.h>
 #include <dwmapi.h>
@@ -21,6 +23,15 @@ static HINSTANCE s_hinst = 0;
 static HWND s_hwndMain = 0;
 static HICON s_hicon = 0;
 static bool s_fInTray = false;
+
+enum class MenuMode { Watching, LDown, Cancelled };
+
+static HMENU s_hmenu = 0;
+static std::vector<SPI<IWbemClassObject>> s_vms;
+static INT s_menuSelectIndex = -1;
+static INT s_menuDownIndex = -1;
+static MenuMode s_menuMode = MenuMode::Watching;
+static RECT s_menuItemRect;
 
 static bool TrayMessage(DWORD dwMessage, UINT uID, HICON hIcon, LPCTSTR pszTip)
 {
@@ -79,43 +90,303 @@ static void DeleteTrayIcon()
     }
 }
 
-static void DoContextMenu()
+#if 0
+namespace Hyper_V_Manager
 {
-    HMENU hmenu = LoadMenu(s_hinst, MAKEINTRESOURCEW(IDR_CONTEXT_MENU));
-    HMENU hmenuSub;
-    UINT id;
-    POINT pt;
-
-    if (hmenu)
+    /// <inheritdoc />
+    /// <summary>
+    /// Main Form
+    /// </summary>
+    public partial class Form1 : Form
     {
-        hmenuSub = GetSubMenu(hmenu, 0);
+        private readonly Timer _timer = new Timer();
+        private readonly Dictionary<string, string> _changingVMs = new Dictionary<string, string>();
 
-        // Workaround:  due to a well-known issue in Windows, the menu won't
-        // disappear unless the window is set as the foreground window.
-        SetForegroundWindow(s_hwndMain);
-
-        GetCursorPos(&pt);
-        id = TrackPopupMenu(hmenuSub,
-                            TPM_LEFTALIGN|TPM_RIGHTBUTTON|TPM_RETURNCMD,
-                            pt.x, pt.y, 0, s_hwndMain, NULL);
-
-        // Workaround:  due to a well-known issue in Windows, the menu won't
-        // disappear correctly unless it is sent a message (WM_NULL is a nop).
-        SendMessage(s_hwndMain, WM_NULL, 0, 0);
-
-        switch (id)
+        /// <summary>
+        /// Form load event
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void Form1_Load(object sender, EventArgs e)
         {
-        case IDM_EXIT:
-            DestroyWindow(s_hwndMain);
-            PostQuitMessage(0);
-            break;
-
-        case 0:
-            break;
+            _timer.Elapsed += TimerElapsed;
+            _timer.Interval = 4500;
+            BuildContextMenu();
         }
 
-        DestroyMenu(hmenu);
+        /// <summary>
+        /// Time elapsed event
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void TimerElapsed(object sender, ElapsedEventArgs e)
+        {
+            if(!contextMenuStrip1.Visible)
+                UpdateBalloontip();
+        }
+
+        /// <summary>
+        /// Update Balloon Tooltip on VM State Change
+        /// </summary>
+        private void UpdateBalloontip()
+        {
+            var localVMs = GetVMs();
+
+            foreach (var vm in localVMs)
+            {
+                if (!_changingVMs.ContainsKey(vm["ElementName"].ToString())) continue;
+                var initvmBalloonState = _changingVMs[vm["ElementName"].ToString()];
+                var vmState = (VmState) Convert.ToInt32(vm["EnabledState"]);
+                var currentBalloonState = vmState.ToString();
+
+                if (initvmBalloonState != currentBalloonState)
+                {
+                    notifyIcon1.ShowBalloonTip(4000, "VM State Changed", vm["ElementName"] + " " + currentBalloonState, ToolTipIcon.Info);
+                    _changingVMs[vm["ElementName"].ToString()] = currentBalloonState;
+                }
+                else if (vmState == VmState.Running || vmState == VmState.Stopped || vmState == VmState.Paused || vmState == VmState.Saved)
+                    _changingVMs.Remove(vm["ElementName"].ToString());
+                else if (_changingVMs.Count <= 0)
+                    _timer.Enabled = false;
+            }
+        }
     }
+}
+#endif
+
+enum class VmOp { Connect, Start, Stop, ShutDown, Save, Pause };
+
+static void AppendStateString(std::wstring& inout, VmState state)
+{
+    static const struct { VmState state; LPCWSTR text; } c_states[] =
+    {
+        { VmState::Unknown,     L"Unknown" },
+        { VmState::Other,       L"Other" },
+        { VmState::Running,     L"Running" },
+        { VmState::Stopped,     L"Stopped" },
+        { VmState::ShutDown,    L"ShutDown" },
+        { VmState::Saved,       L"Saved" },
+        { VmState::Paused,      L"Paused" },
+        { VmState::Starting,    L"Starting" },
+        { VmState::Saving,      L"Saving" },
+        { VmState::Stopping,    L"Stopping" },
+        { VmState::Pausing,     L"Pausing" },
+        { VmState::Resuming,    L"Resuming" },
+    };
+
+    for (const auto& s : c_states)
+    {
+        if (s.state == state)
+        {
+            inout.append(L"  [");
+            inout.append(s.text);
+            inout.append(L"]");
+            return;
+        }
+    }
+
+    if (ULONG(state))
+    {
+        WCHAR unknown[64];
+        swprintf_s(unknown, L"  [%d]", state);
+        inout.append(unknown);
+        return;
+    }
+}
+
+static DWORD EnableFlags(bool enable)
+{
+    return enable ? MF_ENABLED : MF_DISABLED;
+}
+
+static HMENU BuildContextMenu(const std::vector<SPI<IWbemClassObject>> vms)
+{
+    HMENU hmenu = CreatePopupMenu();
+    if (hmenu)
+    {
+        std::wstring name;
+        ULONG state;
+        for (UINT i = 0; i < vms.size(); ++i)
+        {
+            if (!GetStringProp(vms[i], L"ElementName", name) ||
+                !GetIntegerProp(vms[i], L"EnabledState", state))
+                continue;
+
+            VmState vmstate = VmState(state);
+
+            AppendStateString(name, vmstate);
+
+            const UINT idmBase = IDM_FIRSTVM + (i * 10);
+            const UINT idmPopup = idmBase + WORD(VmOp::Connect);
+            AppendMenuW(hmenu, MF_POPUP, idmPopup, name.c_str());
+
+            bool enableStart = true;
+            bool enableStop = true;
+            bool enableSave = true;
+            bool enablePause = true;
+            switch (vmstate)
+            {
+            case VmState::Running:
+                enableStart = false;
+                break;
+            case VmState::Saved:
+            case VmState::ShutDown:
+            case VmState::Stopped:
+                enableStop = false;
+                enableSave = false;
+                enablePause = false;
+                break;
+            case VmState::Paused:
+                enablePause = false;
+                break;
+            }
+
+            HMENU hmenuSub = CreatePopupMenu();
+            AppendMenuW(hmenuSub, MF_STRING, idmBase + WORD(VmOp::Connect), L"Connect");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableStart), idmBase + WORD(VmOp::Start), L"Start");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableStop), idmBase + WORD(VmOp::Stop), L"Stop");
+            AppendMenuW(hmenuSub, MF_STRING, idmBase + WORD(VmOp::ShutDown), L"ShutDown");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableSave), idmBase + WORD(VmOp::Save), L"Save State");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enablePause), idmBase + WORD(VmOp::Pause), L"Pause");
+
+            MENUITEMINFOW mii = { sizeof(mii) };
+            mii.fMask = MIIM_SUBMENU;
+            mii.hSubMenu = hmenuSub;
+            SetMenuItemInfoW(hmenu, idmPopup, false, &mii);
+        }
+        AppendMenuW(hmenu, 0, IDM_EXIT, L"E&xit");
+    }
+
+    return hmenu;
+}
+
+static void DoCommand(UINT id)
+{
+    if (id == IDM_EXIT)
+    {
+        if (s_hwndMain)
+            DestroyWindow(s_hwndMain);
+        PostQuitMessage(0);
+    }
+    else if (id >= IDM_FIRSTVM)
+    {
+        const UINT index = (id - IDM_FIRSTVM) / 10;
+        if (index < s_vms.size())
+        {
+            IWbemClassObject* pObject = s_vms[index];
+            switch (VmOp((id - IDM_FIRSTVM) % 10))
+            {
+                case VmOp::Connect:
+                    VmConnect(pObject);
+                    break;
+                case VmOp::Start:
+                    ChangeVmState(pObject, VmState::Running);
+                    break;
+                case VmOp::Stop:
+                    ChangeVmState(pObject, VmState::Stopped);
+                    break;
+                case VmOp::ShutDown:
+                    ChangeVmState(pObject, VmState::ShutDown);
+                    break;
+                case VmOp::Save:
+                    ChangeVmState(pObject, VmState::Saved);
+                    break;
+                case VmOp::Pause:
+                    ChangeVmState(pObject, VmState::Paused);
+                    break;
+            }
+        }
+    }
+}
+
+static void OnMenuSelect(WPARAM wParam, LPARAM lParam)
+{
+    s_menuSelectIndex = -1;
+
+    const WORD flags = HIWORD(wParam);
+    if (flags & MF_POPUP)
+    {
+        const UINT index = LOWORD(wParam);
+        if (index < s_vms.size())
+        {
+            if (GetMenuItemRect(0, HMENU(lParam), index, &s_menuItemRect))
+            {
+                s_menuSelectIndex = index;
+            }
+        }
+    }
+}
+
+static void OnEnterIdle(WPARAM wParam, LPARAM lParam)
+{
+    if (wParam == MSGF_MENU)
+    {
+        POINT pt;
+        if (!GetCursorPos(&pt))
+        {
+LCancel:
+            s_menuMode = MenuMode::Cancelled;
+            s_menuSelectIndex = -1;
+            s_menuDownIndex = -1;
+            return;
+        }
+
+        const bool fDown = (GetKeyState(VK_LBUTTON) < 0);
+        if (fDown)
+        {
+            if (s_menuMode == MenuMode::Cancelled ||
+                (s_menuMode == MenuMode::LDown && s_menuDownIndex != s_menuSelectIndex) ||
+                !PtInRect(&s_menuItemRect, pt))
+                goto LCancel;
+            s_menuDownIndex = s_menuSelectIndex;
+            s_menuMode = MenuMode::LDown;
+        }
+        else if (s_menuSelectIndex < 0 || !PtInRect(&s_menuItemRect, pt))
+        {
+            s_menuMode = MenuMode::Watching;
+            s_menuDownIndex = -1;
+        }
+        else if (s_menuMode == MenuMode::LDown && s_menuDownIndex == s_menuSelectIndex)
+        {
+            assert(s_menuDownIndex >= 0);
+            SendMessage(s_hwndMain, WM_CANCELMODE, 0, 0);
+            if (UINT(s_menuDownIndex) < s_vms.size())
+                VmConnect(s_vms[s_menuDownIndex]);
+            goto LCancel;
+        }
+    }
+}
+
+static void DoContextMenu(HWND hwnd)
+{
+    s_vms = GetVirtualMachines();
+
+    s_hmenu = BuildContextMenu(s_vms);
+    if (!s_hmenu)
+        return;
+
+    s_menuSelectIndex = -1;
+    s_menuDownIndex = -1;
+    s_menuMode = MenuMode::Watching;
+
+    // Workaround:  due to a well-known issue in Windows, the menu won't
+    // disappear unless the window is set as the foreground window.
+    SetForegroundWindow(hwnd);
+
+    POINT pt;
+    GetCursorPos(&pt);
+    const UINT id = TrackPopupMenu(s_hmenu, TPM_LEFTALIGN|TPM_RIGHTBUTTON|TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, NULL);
+
+    // Workaround:  due to a well-known issue in Windows, the menu won't
+    // disappear correctly unless it is sent a message (WM_NULL is a nop).
+    SendMessage(hwnd, WM_NULL, 0, 0);
+
+    DestroyMenu(s_hmenu);
+    s_hmenu = 0;
+
+    DoCommand(id);
+
+    s_vms.clear();
 }
 
 static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -133,7 +404,7 @@ static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
                 break;
 
             case WM_RBUTTONUP:
-                DoContextMenu();
+                DoContextMenu(hwnd);
                 break;
 
             default:
@@ -142,7 +413,15 @@ static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         }
         break;
 
+    case WM_MENUSELECT:
+        OnMenuSelect(wParam, lParam);
+        break;
+    case WM_ENTERIDLE:
+        OnEnterIdle(wParam, lParam);
+        break;
+
     case WM_DESTROY:
+        s_vms.clear();
         DeleteTrayIcon();
         s_hwndMain = 0;
         break;
