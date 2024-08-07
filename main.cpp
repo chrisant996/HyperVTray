@@ -12,6 +12,12 @@
 #include <wbemidl.h>
 #include <map>
 
+static const WCHAR c_usage[] =
+L"Usage:  HyperVTray [--help --nodarkmode]\n"
+L"\n"
+L"HyperVTray adds a system tray icon which you can right click on to manage Hyper-V virtual machines."
+;
+
 static const UINT c_msgTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 static const WCHAR c_szWndClass[] = L"HyperVTray_hidden_window";
 
@@ -477,7 +483,7 @@ int PASCAL WinMain(HINSTANCE hinstCurrent, HINSTANCE /*hinstPrevious*/, LPSTR /*
             _wcsicmp(argv[0], L"-h") == 0 ||
             _wcsicmp(argv[0], L"--help") == 0)
         {
-            // TODO: show message box with help.
+            MessageBoxW(0, c_usage, L"HyperVTray", MB_OK|MB_ICONINFORMATION);
             return 0;
         }
 
@@ -488,7 +494,9 @@ int PASCAL WinMain(HINSTANCE hinstCurrent, HINSTANCE /*hinstPrevious*/, LPSTR /*
         }
         else
         {
-            // TODO: unrecognized flag.
+            WCHAR message[1024];
+            swprintf_s(message, L"Unrecognized argument \"%s\".\n\n%s", argv[0], c_usage);
+            MessageBox(0, message, L"HyperVTray", MB_OK|MB_ICONERROR);
             return 1;
         }
 
