@@ -96,9 +96,11 @@ static void DeleteTrayIcon()
 // Notifications.
 
 constexpr UINT c_timerId = 99;
-constexpr UINT c_timerInterval = 4500;
+constexpr UINT c_timerFirstInterval = 500;
+constexpr UINT c_timerRepeatInterval = 2500;
 
 static std::map<std::wstring, VmState> s_watching;
+static UINT s_nextInterval = c_timerFirstInterval;
 
 static void DoNotifications()
 {
@@ -119,11 +121,13 @@ static void DoNotifications()
 
         if (watchedState != observedState)
         {
+            s_nextInterval = c_timerRepeatInterval;
             s_watching[vm.name] = observedState;
 
             message = vm.name;
             AppendStateString(message, observedState, false/*brackets*/);
             UpdateTrayIcon(L"VM State Changed", message.c_str());
+            return;
         }
         else if (observedState == VmState::Running ||
                  observedState == VmState::Stopped ||
@@ -246,8 +250,14 @@ static void DoCommand(UINT id)
 
             if (requestedState != VmState::Unknown)
             {
-                s_watching[vm.name] = VmState::Unknown;
-                SetTimer(s_hwndMain, c_timerId, c_timerInterval, 0);
+                ULONG state;
+                if (GetIntegerProp(vm.vm, L"EnabledState", state))
+                {
+                    const VmState observedState = VmState(state);
+                    s_watching[vm.name] = observedState;
+                    s_nextInterval = c_timerFirstInterval;
+                    SetTimer(s_hwndMain, c_timerId, s_nextInterval, 0);
+                }
 
                 ChangeVmState(vm.vm, requestedState);
             }
@@ -384,8 +394,11 @@ static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         if (wParam == c_timerId)
         {
             if (!s_inContextMenu)
+            {
                 DoNotifications();
-            if (!s_watching.size())
+                SetTimer(hwnd, c_timerId, s_nextInterval, 0);
+            }
+            if (s_watching.empty())
                 KillTimer(hwnd, c_timerId);
         }
         break;
