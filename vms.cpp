@@ -4,6 +4,7 @@
 #include "main.h"
 #include "vms.h"
 #include <atlcomcli.h>
+#include <algorithm>
 
 void VmConnect(IWbemClassObject* pObject)
 {
@@ -150,10 +151,10 @@ void ChangeVmState(IWbemClassObject* pObject, VmState requestedState)
     }
 }
 
-std::vector<SPI<IWbemClassObject>> GetVirtualMachines()
+VirtualMachines GetVirtualMachines()
 {
     HRESULT hr;
-    std::vector<SPI<IWbemClassObject>> vms;
+    VirtualMachines vms;
 
     {
         SPI<IWbemLocator> spLocator;
@@ -186,9 +187,15 @@ std::vector<SPI<IWbemClassObject>> GetVirtualMachines()
             if (FAILED(hr) || !uReturned)
                 break;
 
-            vms.emplace_back(std::move(spObject));
+            std::wstring name;
+            if (!GetStringProp(spObject, L"ElementName", name))
+                continue;
+
+            vms.emplace_back(std::move(spObject), std::move(name));
         }
     }
+
+    std::sort(vms.begin(), vms.end(), &VmEntry::less);
 
 LOut:
     return vms;

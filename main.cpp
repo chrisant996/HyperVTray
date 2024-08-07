@@ -98,34 +98,33 @@ static void DoNotifications()
 {
     auto vms = GetVirtualMachines();
 
-    std::wstring name;
+    std::wstring message;
     for (const auto& vm : vms)
     {
-        if (!GetStringProp(vm, L"ElementName", name))
-            continue;
-
-        if (s_watching.find(name) == s_watching.end())
+        if (s_watching.find(vm.name) == s_watching.end())
             continue;
 
         ULONG state;
-        if (!GetIntegerProp(vm, L"EnabledState", state))
+        if (!GetIntegerProp(vm.vm, L"EnabledState", state))
             continue;
 
-        const VmState watchedState = s_watching[name];
+        const VmState watchedState = s_watching[vm.name];
         const VmState observedState = VmState(state);
 
         if (watchedState != observedState)
         {
-            s_watching[name] = observedState;
-            AppendStateString(name, observedState, false/*brackets*/);
-            UpdateTrayIcon(L"VM State Changed", name.c_str());
+            s_watching[vm.name] = observedState;
+
+            message = vm.name;
+            AppendStateString(message, observedState, false/*brackets*/);
+            UpdateTrayIcon(L"VM State Changed", message.c_str());
         }
         else if (observedState == VmState::Running ||
                  observedState == VmState::Stopped ||
                  observedState == VmState::Paused ||
                  observedState == VmState::Saved)
         {
-            s_watching.erase(name);
+            s_watching.erase(vm.name);
             if (s_watching.empty())
                 break;
         }
@@ -137,7 +136,7 @@ static void DoNotifications()
 enum class VmOp { Connect, Start, Stop, ShutDown, Save, Pause };
 enum class MenuMode { Watching, LDown, Cancelled };
 
-static std::vector<SPI<IWbemClassObject>> s_vms;
+static VirtualMachines s_vms;
 static HMENU s_hmenu = 0;
 static bool s_inContextMenu = false;
 static INT s_menuSelectIndex = -1;
@@ -150,7 +149,7 @@ static DWORD EnableFlags(bool enable)
     return enable ? MF_ENABLED : MF_DISABLED;
 }
 
-static HMENU BuildContextMenu(const std::vector<SPI<IWbemClassObject>> vms)
+static HMENU BuildContextMenu(const VirtualMachines vms)
 {
     HMENU hmenu = CreatePopupMenu();
     if (hmenu)
@@ -159,12 +158,12 @@ static HMENU BuildContextMenu(const std::vector<SPI<IWbemClassObject>> vms)
         ULONG state;
         for (UINT i = 0; i < vms.size(); ++i)
         {
-            if (!GetStringProp(vms[i], L"ElementName", name) ||
-                !GetIntegerProp(vms[i], L"EnabledState", state))
+            if (!GetIntegerProp(vms[i].vm, L"EnabledState", state))
                 continue;
 
             VmState vmstate = VmState(state);
 
+            name = vms[i].name;
             AppendStateString(name, vmstate, true/*brackets*/);
 
             const UINT idmBase = IDM_FIRSTVM + (i * 10);
@@ -224,14 +223,14 @@ static void DoCommand(UINT id)
         const UINT index = (id - IDM_FIRSTVM) / 10;
         if (index < s_vms.size())
         {
-            IWbemClassObject* pObject = s_vms[index];
+            const auto& vm = s_vms[index];
 
             const VmOp op = VmOp((id - IDM_FIRSTVM) % 10);
             VmState requestedState = VmState::Unknown;
 
             switch (VmOp((id - IDM_FIRSTVM) % 10))
             {
-            case VmOp::Connect:     VmConnect(pObject); break;
+            case VmOp::Connect:     VmConnect(vm.vm); break;
             case VmOp::Start:       requestedState = VmState::Running; break;
             case VmOp::Stop:        requestedState = VmState::Stopped; break;
             case VmOp::ShutDown:    requestedState = VmState::ShutDown; break;
@@ -241,14 +240,10 @@ static void DoCommand(UINT id)
 
             if (requestedState != VmState::Unknown)
             {
-                std::wstring name;
-                if (GetStringProp(pObject, L"ElementName", name))
-                {
-                    s_watching[name] = VmState::Unknown;
-                    SetTimer(s_hwndMain, c_timerId, c_timerInterval, 0);
-                }
+                s_watching[vm.name] = VmState::Unknown;
+                SetTimer(s_hwndMain, c_timerId, c_timerInterval, 0);
 
-                ChangeVmState(pObject, requestedState);
+                ChangeVmState(vm.vm, requestedState);
             }
         }
     }
@@ -306,7 +301,7 @@ LCancel:
             assert(s_menuDownIndex >= 0);
             SendMessage(s_hwndMain, WM_CANCELMODE, 0, 0);
             if (UINT(s_menuDownIndex) < s_vms.size())
-                VmConnect(s_vms[s_menuDownIndex]);
+                VmConnect(s_vms[s_menuDownIndex].vm);
             goto LCancel;
         }
     }

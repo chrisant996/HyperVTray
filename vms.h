@@ -30,7 +30,20 @@ enum class VmState
 
 void VmConnect(IWbemClassObject* pObject);
 void ChangeVmState(IWbemClassObject* pObject, VmState requestedState);
-std::vector<SPI<IWbemClassObject>> GetVirtualMachines();
+
+struct VmEntry
+{
+    VmEntry(IWbemClassObject* pObject, LPCWSTR name) : vm(pObject), name(name) {}
+    VmEntry(SPI<IWbemClassObject>&& spObject, std::wstring&& name) : vm(std::move(spObject)), name(std::move(name)) {}
+
+    bool operator()(const VmEntry& a, const VmEntry& b) const { return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0; }
+    static bool less(const VmEntry& a, const VmEntry& b) { return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0; }
+
+    SPI<IWbemClassObject> vm;
+    std::wstring name;
+};
+typedef std::vector<VmEntry> VirtualMachines;
+VirtualMachines GetVirtualMachines();
 
 void AppendStateString(std::wstring& inout, VmState state, bool brackets);
 bool GetStringProp(IWbemClassObject* pObject, LPCWSTR propName, std::wstring& out);
