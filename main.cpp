@@ -241,6 +241,7 @@ static HMENU BuildContextMenu(const VirtualMachines vms)
             mii.hSubMenu = hmenuSub;
             SetMenuItemInfoW(hmenu, idmPopup, false, &mii);
         }
+        AppendMenuW(hmenu, MF_SEPARATOR, -1, L"");
         AppendMenuW(hmenu, 0, IDM_EXIT, L"E&xit");
     }
 
