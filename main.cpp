@@ -99,7 +99,23 @@ constexpr UINT c_timerId = 99;
 constexpr UINT c_timerFirstInterval = 500;
 constexpr UINT c_timerRepeatInterval = 2500;
 
-static std::map<std::wstring, VmState> s_watching;
+struct WatchForStateChanges
+{
+    WatchForStateChanges() = default;
+    WatchForStateChanges(VmState _original, VmState _target)
+        : original(_original)
+        , seen(_original)
+        , target(_target)
+        , changed(false)
+    {}
+
+    VmState original = VmState::Unknown;
+    VmState seen = VmState::Unknown;
+    VmState target = VmState::Unknown;
+    bool changed = false;
+};
+
+static std::map<std::wstring, WatchForStateChanges> s_watching;
 static UINT s_nextInterval = c_timerFirstInterval;
 
 static void DoNotifications()
@@ -109,30 +125,41 @@ static void DoNotifications()
     std::wstring message;
     for (const auto& vm : vms)
     {
-        if (s_watching.find(vm.name) == s_watching.end())
+        auto& watching = s_watching.find(vm.name);
+        if (watching == s_watching.end())
             continue;
 
         ULONG state;
         if (!GetIntegerProp(vm.vm, L"EnabledState", state))
             continue;
 
-        const VmState watchedState = s_watching[vm.name];
-        const VmState observedState = VmState(state);
+        auto& w = watching->second;
+        const VmState oldState = w.seen;
+        const VmState newState = VmState(state);
 
-        if (watchedState != observedState)
+        bool doErase = false;
+
+        if (oldState != newState)
         {
             s_nextInterval = c_timerRepeatInterval;
-            s_watching[vm.name] = observedState;
+            w.seen = newState;
+            w.changed = true;
+
+            doErase = (newState == w.target);
 
             message = vm.name;
-            AppendStateString(message, observedState, false/*brackets*/);
+            AppendStateString(message, newState, false/*brackets*/);
             UpdateTrayIcon(L"VM State Changed", message.c_str());
-            return;
         }
-        else if (observedState == VmState::Running ||
-                 observedState == VmState::Stopped ||
-                 observedState == VmState::Paused ||
-                 observedState == VmState::Saved)
+        else if (w.changed && (newState == VmState::Running ||
+                               newState == VmState::Stopped ||
+                               newState == VmState::Paused ||
+                               newState == VmState::Saved))
+        {
+            doErase = true;
+        }
+
+        if (doErase)
         {
             s_watching.erase(vm.name);
             if (s_watching.empty())
@@ -253,8 +280,7 @@ static void DoCommand(UINT id)
                 ULONG state;
                 if (GetIntegerProp(vm.vm, L"EnabledState", state))
                 {
-                    const VmState observedState = VmState(state);
-                    s_watching[vm.name] = observedState;
+                    s_watching[vm.name] = { VmState(state), requestedState };
                     s_nextInterval = c_timerFirstInterval;
                     SetTimer(s_hwndMain, c_timerId, s_nextInterval, 0);
                 }
