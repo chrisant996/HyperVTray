@@ -200,7 +200,13 @@ static HMENU BuildContextMenu(const VirtualMachines vms)
 
             VmState vmstate = VmState(state);
 
-            name = vms[i].name;
+            name.clear();
+            if (i + 1 <= 9)
+            {
+                WCHAR prefix[] = { '&', WCHAR('1' + i), ' ', '-', ' ', '\0' };
+                name = prefix;
+            }
+            name += vms[i].name;
             AppendStateString(name, vmstate, true/*brackets*/);
 
             const UINT idmBase = IDM_FIRSTVM + (i * 10);
@@ -229,12 +235,12 @@ static HMENU BuildContextMenu(const VirtualMachines vms)
             }
 
             HMENU hmenuSub = CreatePopupMenu();
-            AppendMenuW(hmenuSub, MF_STRING, idmBase + WORD(VmOp::Connect), L"Connect");
-            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableStart), idmBase + WORD(VmOp::Start), L"Start");
-            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableStop), idmBase + WORD(VmOp::Stop), L"Stop");
-            AppendMenuW(hmenuSub, MF_STRING, idmBase + WORD(VmOp::ShutDown), L"ShutDown");
-            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableSave), idmBase + WORD(VmOp::Save), L"Save State");
-            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enablePause), idmBase + WORD(VmOp::Pause), L"Pause");
+            AppendMenuW(hmenuSub, MF_STRING, idmBase + WORD(VmOp::Connect), L"&Connect");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableStart), idmBase + WORD(VmOp::Start), L"Sta&rt");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableStop), idmBase + WORD(VmOp::Stop), L"St&op");
+            AppendMenuW(hmenuSub, MF_STRING, idmBase + WORD(VmOp::ShutDown), L"Shut&Down");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enableSave), idmBase + WORD(VmOp::Save), L"Sa&ve State");
+            AppendMenuW(hmenuSub, MF_STRING|EnableFlags(enablePause), idmBase + WORD(VmOp::Pause), L"&Pause");
 
             MENUITEMINFOW mii = { sizeof(mii) };
             mii.fMask = MIIM_SUBMENU;
