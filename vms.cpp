@@ -12,7 +12,6 @@ void VmConnect(IWbemClassObject* pObject)
     DWORD dw = GetEnvironmentVariableW(L"SYSTEMROOT", appname, _countof(appname));
     if (!dw || dw > _countof(appname))
         return;
-
     if (wcscat_s(appname, L"\\System32\\vmconnect.exe"))
         return;
 
@@ -21,14 +20,22 @@ void VmConnect(IWbemClassObject* pObject)
         return;
 
     WCHAR command[1024];
-    if (swprintf_s(command, L"\"%s\\System32\\vmconnect.exe\" localhost \"%s\"", appname, name.c_str()) < 0)
+    if (swprintf_s(command, L"\"%s\" localhost \"%s\"", appname, name.c_str()) < 0)
         return;
 
     const DWORD dwCreationFlags = 0;
     STARTUPINFO si = { sizeof(si) };
     PROCESS_INFORMATION pi = { 0 };
     if (!CreateProcessW(appname, command, 0, 0, false, dwCreationFlags, 0, 0, &si, &pi))
+    {
+#ifdef DEBUG
+        const DWORD err = GetLastError();
+        WCHAR message[1024] = { 0 };
+        if (swprintf_s(message, L"Error Code %d (0x%X).", err, err) > 0)
+            MessageBox(NULL, message, L"HyperVTray Error", MB_ICONERROR|MB_OK);
+#endif
         return;
+    }
 
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
