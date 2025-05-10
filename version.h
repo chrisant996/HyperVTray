@@ -4,9 +4,9 @@
 #pragma once
 
 #define VERSION_MAJOR           0
-#define VERSION_MINOR           2
+#define VERSION_MINOR           3
 
-#define COPYRIGHT_STR           "Copyright (C) 2024 Christopher Antos"
+#define COPYRIGHT_STR           "Copyright (C) 2024-2025 Christopher Antos"
 
 #define IND_VER2( a, b ) #a ## "." ## #b
 #define IND_VER4( a, b, c, d ) L#a ## L"." ## L#b ## L"." ## L#c ## L"." ## L#d
