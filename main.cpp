@@ -248,6 +248,8 @@ static HMENU BuildContextMenu(const VirtualMachines vms)
             SetMenuItemInfoW(hmenu, idmPopup, false, &mii);
         }
         AppendMenuW(hmenu, MF_SEPARATOR, -1, L"");
+        AppendMenuW(hmenu, 0, IDM_MANAGER, L"Hyper-V &Manager");
+        AppendMenuW(hmenu, MF_SEPARATOR, -1, L"");
         AppendMenuW(hmenu, 0, IDM_EXIT, L"E&xit");
     }
 
@@ -261,6 +263,10 @@ static void DoCommand(UINT id)
         if (s_hwndMain)
             DestroyWindow(s_hwndMain);
         PostQuitMessage(0);
+    }
+    else if (id == IDM_MANAGER)
+    {
+        LaunchManager(s_hwndMain);
     }
     else if (id >= IDM_FIRSTVM)
     {

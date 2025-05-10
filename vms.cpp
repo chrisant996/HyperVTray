@@ -5,6 +5,54 @@
 #include "vms.h"
 #include <atlcomcli.h>
 #include <algorithm>
+#include <shellapi.h>
+
+void LaunchManager(HWND hwnd)
+{
+    WCHAR system32[1024] = { 0 };
+    DWORD dw = GetEnvironmentVariableW(L"SYSTEMROOT", system32, _countof(system32));
+    if (!dw || dw > _countof(system32))
+        return;
+    if (wcscat_s(system32, L"\\System32"))
+        return;
+
+    WCHAR appname[1024];
+    if (swprintf_s(appname, L"%s\\mmc.exe", system32) < 0)
+        return;
+
+    WCHAR args[1024];
+    if (swprintf_s(args, L"\"%s\\virtmgmt.msc\"", system32) < 0)
+        return;
+
+    WCHAR cwd[1024] = { 0 };
+    dw = GetEnvironmentVariableW(L"ProgramFiles", cwd, _countof(cwd));
+    if (!dw || dw > _countof(cwd))
+        return;
+    if (wcscat_s(cwd, L"\\Hyper-V"))
+        return;
+
+    SHELLEXECUTEINFOW sei = { sizeof(sei) };
+    sei.hwnd = hwnd;
+    sei.fMask = SEE_MASK_FLAG_DDEWAIT|SEE_MASK_FLAG_NO_UI|SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"runas";
+    sei.lpFile = appname;
+    sei.lpParameters = args;
+    sei.lpDirectory = cwd;
+    sei.nShow = SW_SHOWNORMAL;
+
+    if (!ShellExecuteExW(&sei) || !sei.hProcess)
+    {
+#ifdef DEBUG
+        const DWORD err = GetLastError();
+        WCHAR message[1024] = { 0 };
+        if (swprintf_s(message, L"Error Code %d (0x%X).", err, err) > 0)
+            MessageBox(NULL, message, L"HyperVTray Error", MB_ICONERROR|MB_OK);
+#endif
+        return;
+    }
+
+    CloseHandle(sei.hProcess);
+}
 
 void VmConnect(IWbemClassObject* pObject)
 {

@@ -28,6 +28,7 @@ enum class VmState
     Resuming    = 32777,
 };
 
+void LaunchManager(HWND hwnd);
 void VmConnect(IWbemClassObject* pObject);
 void ChangeVmState(IWbemClassObject* pObject, VmState requestedState);
 

@@ -62,6 +62,7 @@ project("hypervtray")
     links("comctl32")
     links("dwmapi")
     links("wbemuuid")
+    links("shell32")
 
     language("c++")
     flags("fatalwarnings")

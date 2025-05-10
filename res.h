@@ -12,5 +12,6 @@
 // Menu Commands.
 
 #define IDM_EXIT                100
+#define IDM_MANAGER             101
 #define IDM_FIRSTVM             200
 
