@@ -25,7 +25,7 @@ If HypervTray isn't able to query and control Hyper-V (e.g. if the list of VMs i
 
 ## Building HyperVTray
 
-HyperVTray uses [Premake](http://premake.github.io) to generate Visual Studio solutions. Note that Premake >= 5.0.0-beta1 is required.
+HyperVTray uses [Premake](http://premake.github.io) to generate Visual Studio solutions. Note that Premake >= 5.0.0-beta4 is required.
 
 1. Cd to your clone of hypervtray.
 2. Run <code>premake5.exe <em>toolchain</em></code> (where <em>toolchain</em> is one of Premake's actions - see `premake5.exe --help`).

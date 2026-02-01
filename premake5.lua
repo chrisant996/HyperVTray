@@ -16,7 +16,7 @@ end
 --------------------------------------------------------------------------------
 local function define_exe(name, exekind)
     project(name)
-    flags("fatalwarnings")
+    fatalwarnings("all")
     language("c++")
     kind(exekind or "consoleapp")
 end
@@ -29,7 +29,7 @@ workspace("hypervtray")
     location(to)
 
     characterset("Unicode")
-    flags("NoManifest")
+    manifest("off")
     staticruntime("on")
     symbols("on")
     exceptionhandling("off")
@@ -50,22 +50,18 @@ workspace("hypervtray")
         defines("NDEBUG")
 
     filter {"release", "action:vs*"}
-        flags("LinkTimeOptimization")
+        linktimeoptimization("on")
 
     filter "action:vs*"
         defines("_HAS_EXCEPTIONS=0")
 
 --------------------------------------------------------------------------------
-project("hypervtray")
+define_exe("hypervtray", "windowedapp")
     targetname("HyperVTray")
-    kind("windowedapp")
     links("comctl32")
     links("dwmapi")
     links("wbemuuid")
     links("shell32")
-
-    language("c++")
-    flags("fatalwarnings")
 
     includedirs(".build/vs2022/bin") -- for the generated manifest.xml
     files("*.cpp")
